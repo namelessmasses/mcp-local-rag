@@ -49,3 +49,16 @@ export const RERANK_TIMEOUT_MAX_MS = 600_000
  * asks for it to be tuned.
  */
 export const RERANK_CANDIDATE_MULTIPLIER = 3
+
+/**
+ * LM Studio embedding backend defaults and accepted ranges. The timeout is
+ * generous because the first request may make LM Studio load the model.
+ */
+export const DEFAULT_LMSTUDIO_BASE_URL = 'http://127.0.0.1:1234/v1'
+export const DEFAULT_LMSTUDIO_BATCH_SIZE = 16
+export const MAX_LMSTUDIO_BATCH_SIZE = 1024
+export const DEFAULT_LMSTUDIO_MAX_INPUT_TOKENS = 2048
+export const MAX_LMSTUDIO_MAX_INPUT_TOKENS = 1_000_000
+export const DEFAULT_LMSTUDIO_TIMEOUT_MS = 120_000
+export const LMSTUDIO_TIMEOUT_MIN_MS = 100
+export const LMSTUDIO_TIMEOUT_MAX_MS = 3_600_000
