@@ -9,10 +9,12 @@ import { LmStudioEmbedder } from '../lmstudio-embedder.js'
 const live = process.env['LMSTUDIO_LIVE'] === '1'
 
 describe.skipIf(!live)('LM Studio live', () => {
-  const resolved = resolveEmbedBackend({ ...process.env, EMBED_BACKEND: 'lmstudio' })
-  const settings = resolved.lmstudio
-
   it('embeds queries and documents into consistent unit vectors', async () => {
+    // Resolved here, not at collection time, so a skipped run never needs LMSTUDIO_MODEL.
+    const { lmstudio: settings } = resolveEmbedBackend({
+      ...process.env,
+      EMBED_BACKEND: 'lmstudio',
+    })
     if (settings === undefined) {
       throw new Error('LMSTUDIO_MODEL must be set for the live test')
     }
