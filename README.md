@@ -361,6 +361,80 @@ not match the schema.
 </details>
 
 <details>
+<summary>LM Studio Embeddings (optional)</summary>
+
+By default, embeddings run in-process with Transformers.js. To use a model served by
+[LM Studio](https://lmstudio.ai) instead, set `EMBED_BACKEND=lmstudio`. The default
+embedder is not downloaded or loaded in that mode, and nothing changes unless you set it.
+
+1. In LM Studio, download an embedding model, for example `Qwen3-Embedding-0.6B` or
+   `EmbeddingGemma-300m`.
+2. Load it as an embedding model, and start the local server (Developer tab, **Start Server**,
+   or `lms server start`). The default address is `http://127.0.0.1:1234`.
+3. Use the model id LM Studio shows, such as `text-embedding-qwen3-embedding-0.6b` or
+   `text-embedding-embeddinggemma-300m`, as `LMSTUDIO_MODEL`.
+4. Set the variables below in your MCP client's environment (or the shell, for the CLI).
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `EMBED_BACKEND` | `transformers` | `transformers` or `lmstudio`. Any other value is an error |
+| `LMSTUDIO_MODEL` | (required) | Model id as LM Studio lists it. Missing is an error; there is no fallback to `transformers` |
+| `LMSTUDIO_BASE_URL` | `http://127.0.0.1:1234/v1` | LM Studio server URL, including `/v1` |
+| `LMSTUDIO_BATCH_SIZE` | `16` | Maximum inputs per HTTP request (1–1024) |
+| `LMSTUDIO_MAX_INPUT_TOKENS` | `2048` | Token cap used when splitting long passages. Raise it for long-context models such as Qwen3-Embedding |
+| `LMSTUDIO_TIMEOUT_MS` | `120000` | Per-request timeout (100–3600000). The first request may load the model |
+| `LMSTUDIO_QUERY_PROMPT` | (model default) | Text prepended to queries, replacing the built-in prompt |
+| `LMSTUDIO_DOCUMENT_PROMPT` | (model default) | Text prepended to stored chunks, replacing the built-in prompt |
+
+Invalid numeric or URL values print a warning and use the default. Vectors are L2-normalized
+here, so LM Studio's own normalization does not matter.
+
+**Prompts.** Queries and stored chunks are sent with the prompts these models were trained for:
+
+- Qwen3-Embedding: queries get `Instruct: Given a web search query, retrieve relevant passages
+  that answer the query` plus a newline and `Query:`; documents are sent as-is.
+- EmbeddingGemma: queries get `task: search result | query: `; documents get
+  `title: none | text: `.
+- Other model ids are sent as-is, and `status` and tool responses carry a warning. Use
+  `LMSTUDIO_QUERY_PROMPT` and `LMSTUDIO_DOCUMENT_PROMPT` if your model expects prompts.
+
+**Token counts.** LM Studio does not report tokens, so lengths are estimated as UTF-8 bytes / 2.
+That overestimates English text and is safe for CJK. The estimate only decides where long
+passages are split.
+
+**Use a new `DB_PATH` for each model.** Models differ in dimension (Qwen3-Embedding-0.6B is 1024,
+EmbeddingGemma-300m is 768, the default MiniLM is 384), and vectors from different models are not
+comparable even when dimensions match. `sync` skips files whose content hash is unchanged and does
+not notice a model change, so after switching models either point `DB_PATH` at a new directory
+or delete the index and re-ingest everything. With `lmstudio`, `status` reports
+`embedder.backend` and `embedder.model`, which helps spot a mixed database.
+
+For example, in an MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "local-rag": {
+      "command": "npx",
+      "args": ["-y", "mcp-local-rag"],
+      "env": {
+        "BASE_DIR": "/path/to/your/documents",
+        "DB_PATH": "/path/to/lancedb-embeddinggemma",
+        "EMBED_BACKEND": "lmstudio",
+        "LMSTUDIO_MODEL": "text-embedding-embeddinggemma-300m"
+      }
+    }
+  }
+}
+```
+
+To check the connection before indexing, build the project and run
+`LMSTUDIO_MODEL=<model id> node scripts/lmstudio-smoke.mjs`. It embeds one string and prints the
+dimension, vector norm, and latency.
+
+</details>
+
+<details>
 <summary>PDF Figures and Stored Images</summary>
 
 By default, ingestion indexes only text. To make PDF figures searchable, enable local caption
