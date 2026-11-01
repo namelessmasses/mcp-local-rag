@@ -20,7 +20,8 @@ import {
   DocumentEmbeddingSession,
   removeEmbeddingSnapshot,
 } from '../embedder/embedding-snapshot.js'
-import { Embedder } from '../embedder/index.js'
+import { createEmbeddingProvider, type EmbeddingProvider } from '../embedder/factory.js'
+import type { EmbedderConfig } from '../embedder/index.js'
 import { listDocuments } from '../features/list.js'
 import {
   formatSyncError,
@@ -229,6 +230,26 @@ function coverageWarnings(coverage: SyncCoverage, maxFileSize: number): string[]
   ]
 }
 
+/** Maps server config to the configured embedding backend. */
+function buildEmbedder(config: RAGServerConfig): EmbeddingProvider {
+  const embedderConfig: EmbedderConfig = {
+    modelPath: config.modelName,
+    batchSize: 16,
+    cacheDir: config.cacheDir,
+  }
+  if (config.device !== undefined) {
+    embedderConfig.device = config.device
+  }
+  if (config.dtype !== undefined) {
+    embedderConfig.dtype = config.dtype
+  }
+  if (config.titlePrefix) {
+    embedderConfig.titlePrefix = true
+  }
+  embedderConfig.headingPrefix = config.headingPrefix === true
+  return createEmbeddingProvider(embedderConfig, config.lmstudio)
+}
+
 /** RAG server compliant with MCP Protocol */
 /** Formats whose embedded images this server can extract. */
 function supportsEmbeddedImages(filePath: string): boolean {
@@ -239,7 +260,9 @@ function supportsEmbeddedImages(filePath: string): boolean {
 export class RAGServer {
   private readonly server: Server
   private readonly vectorStore: VectorStore
-  private readonly embedder: Embedder
+  private readonly embedder: EmbeddingProvider
+  /** Set for non-default backends, so `status` can tell mixed databases apart. */
+  private readonly embedderInfo: { backend: string; model: string } | undefined
   private readonly chunker: SemanticChunker
   private readonly parser: DocumentParser
   private readonly dbPath: string
@@ -341,22 +364,11 @@ export class RAGServer {
       vectorStoreConfig.maxFiles = config.maxFiles
     }
     this.vectorStore = new VectorStore(vectorStoreConfig)
-    const embedderConfig: ConstructorParameters<typeof Embedder>[0] = {
-      modelPath: config.modelName,
-      batchSize: 16,
-      cacheDir: config.cacheDir,
-    }
-    if (config.device !== undefined) {
-      embedderConfig.device = config.device
-    }
-    if (config.dtype !== undefined) {
-      embedderConfig.dtype = config.dtype
-    }
-    if (config.titlePrefix) {
-      embedderConfig.titlePrefix = true
-    }
-    embedderConfig.headingPrefix = config.headingPrefix === true
-    this.embedder = new Embedder(embedderConfig)
+    this.embedder = buildEmbedder(config)
+    this.embedderInfo =
+      config.lmstudio === undefined
+        ? undefined
+        : { backend: 'lmstudio', model: config.lmstudio.model }
     this.chunker = new SemanticChunker(
       config.chunkMinLength !== undefined ? { minChunkLength: config.chunkMinLength } : {}
     )
@@ -1021,7 +1033,11 @@ export class RAGServer {
     const content: RagTextContentBlock[] = [
       {
         type: 'text',
-        text: JSON.stringify(status, null, 2),
+        text: JSON.stringify(
+          this.embedderInfo === undefined ? status : { ...status, embedder: this.embedderInfo },
+          null,
+          2
+        ),
       },
     ]
 

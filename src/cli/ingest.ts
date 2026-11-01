@@ -4,7 +4,7 @@ import { stat } from 'node:fs/promises'
 
 import { SemanticChunker } from '../chunker/index.js'
 import { DocumentEmbeddingSession } from '../embedder/embedding-snapshot.js'
-import type { Embedder } from '../embedder/index.js'
+import type { EmbeddingProvider } from '../embedder/factory.js'
 import {
   buildPreparedFileVectorChunks,
   type PrepareFileForIngestOptions,
@@ -285,7 +285,7 @@ export interface SingleFileIngestCollaborators {
   dbPath: string
   parser: DocumentParser
   chunker: SemanticChunker
-  embedder: Embedder
+  embedder: EmbeddingProvider
   vectorStore: VectorStore
 }
 

@@ -1,7 +1,8 @@
 // Shared CLI component helpers — factory functions for VectorStore and Embedder
 // plus base-directory resolution shared by every subcommand that scans files.
 
-import { Embedder } from '../embedder/index.js'
+import { createEmbeddingProvider, type EmbeddingProvider } from '../embedder/factory.js'
+import type { EmbedderConfig } from '../embedder/index.js'
 import {
   type BaseDirsConfig,
   type BaseDirsConfigWarning,
@@ -63,11 +64,11 @@ export function createVectorStore(config: ResolvedGlobalConfig): VectorStore {
 }
 
 /**
- * Create an uninitialized Embedder from resolved global config.
- * Callers are responsible for managing the Embedder lifecycle.
+ * Create an uninitialized embedding provider from resolved global config.
+ * Callers are responsible for managing its lifecycle.
  */
-export function createEmbedder(config: ResolvedGlobalConfig): Embedder {
-  const embedderConfig: ConstructorParameters<typeof Embedder>[0] = {
+export function createEmbedder(config: ResolvedGlobalConfig): EmbeddingProvider {
+  const embedderConfig: EmbedderConfig = {
     modelPath: config.modelName,
     batchSize: 16,
     cacheDir: config.cacheDir,
@@ -94,7 +95,7 @@ export function createEmbedder(config: ResolvedGlobalConfig): Embedder {
   if (headingPrefix.value) {
     embedderConfig.headingPrefix = true
   }
-  return new Embedder(embedderConfig)
+  return createEmbeddingProvider(embedderConfig, config.lmstudio)
 }
 
 /**

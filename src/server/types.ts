@@ -1,5 +1,6 @@
 // Type definitions for RAGServer
 
+import type { LmStudioSettings } from '../embedder/factory.js'
 import type { BaseDirsConfigError } from '../utils/base-dirs.js'
 import type { ContentFormat } from '../utils/raw-data-utils.js'
 import type { SourceContext } from '../utils/source-context.js'
@@ -24,6 +25,8 @@ interface RAGServerConfigBase {
   device?: string
   /** Embedding quantization dtype (fp32, fp16, q8, int8, ...). Unset → fp32. */
   dtype?: string
+  /** LM Studio embedding backend; unset keeps the Transformers.js embedder. */
+  lmstudio?: LmStudioSettings
   /** Maximum distance threshold for quality filtering (optional) */
   maxDistance?: number
   /** Grouping mode for quality filtering (optional) */

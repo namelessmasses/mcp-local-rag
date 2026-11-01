@@ -1,6 +1,18 @@
 // Shared CLI global options — parsed before subcommand routing
 
-import { MAX_CHUNK_MIN_LENGTH, MAX_FILE_SIZE_LIMIT } from '../utils/limits.js'
+import type { LmStudioSettings } from '../embedder/factory.js'
+import {
+  DEFAULT_LMSTUDIO_BASE_URL,
+  DEFAULT_LMSTUDIO_BATCH_SIZE,
+  DEFAULT_LMSTUDIO_MAX_INPUT_TOKENS,
+  DEFAULT_LMSTUDIO_TIMEOUT_MS,
+  LMSTUDIO_TIMEOUT_MAX_MS,
+  LMSTUDIO_TIMEOUT_MIN_MS,
+  MAX_CHUNK_MIN_LENGTH,
+  MAX_FILE_SIZE_LIMIT,
+  MAX_LMSTUDIO_BATCH_SIZE,
+  MAX_LMSTUDIO_MAX_INPUT_TOKENS,
+} from '../utils/limits.js'
 import { checkSensitivePath } from '../utils/sensitive-path.js'
 import { isQualityProfile, type QualityProfile } from '../utils/visual-profile.js'
 import type { GroupingMode } from '../vectordb/index.js'
@@ -130,6 +142,8 @@ export interface ResolvedGlobalConfig {
   grouping?: GroupingMode
   maxFiles?: number
   hybridWeight?: number
+  /** Set only for `EMBED_BACKEND=lmstudio`; unset keeps the Transformers.js embedder. */
+  lmstudio?: LmStudioSettings
 }
 
 // ============================================
@@ -319,6 +333,22 @@ export function parseHybridWeight(value: string | undefined): ParseResult<number
   return { value: parsed }
 }
 
+/** Exits with the message when the backend choice is unusable, like other CLI config errors. */
+function applyEmbedBackend(config: ResolvedGlobalConfig): void {
+  try {
+    const embedBackend = resolveEmbedBackend(process.env)
+    for (const warning of embedBackend.warnings) {
+      console.error(`Warning: ${warning}`)
+    }
+    if (embedBackend.lmstudio !== undefined) {
+      config.lmstudio = embedBackend.lmstudio
+    }
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
+}
+
 export function resolveGlobalConfig(options: GlobalOptions): ResolvedGlobalConfig {
   const dbPath = options.dbPath ?? process.env['DB_PATH'] ?? GLOBAL_DEFAULTS.dbPath
   const cacheDir = options.cacheDir ?? process.env['CACHE_DIR'] ?? GLOBAL_DEFAULTS.cacheDir
@@ -356,6 +386,7 @@ export function resolveGlobalConfig(options: GlobalOptions): ResolvedGlobalConfi
   }
 
   const config: ResolvedGlobalConfig = { dbPath, cacheDir, modelName }
+  applyEmbedBackend(config)
   if (maxDistance.value !== undefined) {
     config.maxDistance = maxDistance.value
   }
@@ -369,6 +400,115 @@ export function resolveGlobalConfig(options: GlobalOptions): ResolvedGlobalConfi
     config.hybridWeight = hybridWeight.value
   }
   return config
+}
+
+/** Parse an integer setting within `[min, max]`, falling back to `fallback` with a warning. */
+function parseBoundedInteger(
+  name: string,
+  value: string | undefined,
+  range: { fallback: number; min: number; max: number }
+): { value: number; warning?: string } {
+  if (!value) {
+    return { value: range.fallback }
+  }
+  const parsed = /^\d+$/.test(value) ? Number(value) : Number.NaN
+  if (!Number.isSafeInteger(parsed) || parsed < range.min || parsed > range.max) {
+    return {
+      value: range.fallback,
+      warning: `Invalid ${name} value: "${value.slice(0, 100)}". Expected integer between ${range.min} and ${range.max}. Using default (${range.fallback}).`,
+    }
+  }
+  return { value: parsed }
+}
+
+/** Parse `LMSTUDIO_BASE_URL`: an http(s) URL, kept without a trailing slash. */
+export function parseLmStudioBaseUrl(value: string | undefined): {
+  value: string
+  warning?: string
+} {
+  const trimmed = value?.trim() ?? ''
+  if (trimmed.length === 0) {
+    return { value: DEFAULT_LMSTUDIO_BASE_URL }
+  }
+  let valid = false
+  try {
+    const protocol = new URL(trimmed).protocol
+    valid = protocol === 'http:' || protocol === 'https:'
+  } catch {
+    valid = false
+  }
+  if (!valid) {
+    return {
+      value: DEFAULT_LMSTUDIO_BASE_URL,
+      warning: `Invalid LMSTUDIO_BASE_URL value: "${trimmed.slice(0, 100)}". Expected an http(s) URL. Using default (${DEFAULT_LMSTUDIO_BASE_URL}).`,
+    }
+  }
+  return { value: trimmed.replace(/\/+$/, '') }
+}
+
+/** Resolved embedding backend: LM Studio settings only when it was asked for. */
+export interface EmbedBackendResolution {
+  lmstudio?: LmStudioSettings
+  warnings: string[]
+}
+
+/**
+ * Resolve `EMBED_BACKEND` and the `LMSTUDIO_*` settings. Throws instead of
+ * falling back to transformers when the choice is unusable: a silent switch
+ * would embed with a different model and dimension into the same database.
+ */
+export function resolveEmbedBackend(env: NodeJS.ProcessEnv): EmbedBackendResolution {
+  const backend = (env['EMBED_BACKEND'] ?? '').trim().toLowerCase()
+  if (backend === '' || backend === 'transformers') {
+    return { warnings: [] }
+  }
+  if (backend !== 'lmstudio') {
+    throw new Error(
+      `Invalid EMBED_BACKEND value: "${backend.slice(0, 100)}". Expected "transformers" or "lmstudio".`
+    )
+  }
+  const model = (env['LMSTUDIO_MODEL'] ?? '').trim()
+  if (model === '') {
+    throw new Error(
+      'EMBED_BACKEND=lmstudio requires LMSTUDIO_MODEL (the embedding model id shown in LM Studio, e.g. text-embedding-embeddinggemma-300m).'
+    )
+  }
+  const baseUrl = parseLmStudioBaseUrl(env['LMSTUDIO_BASE_URL'])
+  const batchSize = parseBoundedInteger('LMSTUDIO_BATCH_SIZE', env['LMSTUDIO_BATCH_SIZE'], {
+    fallback: DEFAULT_LMSTUDIO_BATCH_SIZE,
+    min: 1,
+    max: MAX_LMSTUDIO_BATCH_SIZE,
+  })
+  const maxInputTokens = parseBoundedInteger(
+    'LMSTUDIO_MAX_INPUT_TOKENS',
+    env['LMSTUDIO_MAX_INPUT_TOKENS'],
+    { fallback: DEFAULT_LMSTUDIO_MAX_INPUT_TOKENS, min: 1, max: MAX_LMSTUDIO_MAX_INPUT_TOKENS }
+  )
+  const timeoutMs = parseBoundedInteger('LMSTUDIO_TIMEOUT_MS', env['LMSTUDIO_TIMEOUT_MS'], {
+    fallback: DEFAULT_LMSTUDIO_TIMEOUT_MS,
+    min: LMSTUDIO_TIMEOUT_MIN_MS,
+    max: LMSTUDIO_TIMEOUT_MAX_MS,
+  })
+  const lmstudio: LmStudioSettings = {
+    baseUrl: baseUrl.value,
+    model,
+    batchSize: batchSize.value,
+    maxInputTokens: maxInputTokens.value,
+    timeoutMs: timeoutMs.value,
+  }
+  // Prompts are prepended verbatim, so surrounding whitespace is significant.
+  const queryPrompt = env['LMSTUDIO_QUERY_PROMPT']
+  const documentPrompt = env['LMSTUDIO_DOCUMENT_PROMPT']
+  if (queryPrompt) {
+    lmstudio.queryPrompt = queryPrompt
+  }
+  if (documentPrompt) {
+    lmstudio.documentPrompt = documentPrompt
+  }
+  const warnings = [baseUrl, batchSize, maxInputTokens, timeoutMs]
+    .map((parsed) => parsed.warning)
+    .filter((warning): warning is string => warning !== undefined)
+  return { lmstudio, warnings }
 }
 
 /**

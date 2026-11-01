@@ -8,6 +8,7 @@ import {
   parseMaxFiles,
   resolveDevice,
   resolveDtype,
+  resolveEmbedBackend,
 } from './cli/options.js'
 import { RAGServer } from './server/index.js'
 import {
@@ -269,6 +270,14 @@ export async function resolveServerConfig(
   }
 
   configWarnings.push(...applyOptionalSettings(config, env))
+
+  // Throws for an unusable backend choice rather than falling back to the
+  // default embedder, which would write other-dimension vectors into this DB.
+  const embedBackend = resolveEmbedBackend(env)
+  if (embedBackend.lmstudio !== undefined) {
+    config.lmstudio = embedBackend.lmstudio
+  }
+  configWarnings.push(...embedBackend.warnings)
 
   // Set dtype only when defined, so config.dtype === undefined keeps meaning
   // "RAG_DTYPE unset" (the embedder then applies its fp32 default).

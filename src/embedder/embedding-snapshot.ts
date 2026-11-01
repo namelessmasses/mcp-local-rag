@@ -28,7 +28,8 @@ interface EmbeddingBatchRequest {
 
 export interface PersistentEmbeddingProvider extends EmbedderInterface {
   embedBatch(texts: string[], role?: EmbeddingRole): Promise<number[][]>
-  getComputationIdentity(): Promise<EmbeddingComputationIdentity | null>
+  /** Omitted by backends whose model can change under the same id: nothing is cached. */
+  getComputationIdentity?(): Promise<EmbeddingComputationIdentity | null>
 }
 
 /** Exact indexed path identity is shared by CLI and MCP for the same DB key. */
@@ -221,7 +222,7 @@ export class DocumentEmbeddingSession implements EmbedderInterface {
     }
     let identity: EmbeddingComputationIdentity | null
     try {
-      identity = await this.embedder.getComputationIdentity()
+      identity = (await this.embedder.getComputationIdentity?.()) ?? null
     } catch {
       identity = null
     }
@@ -318,7 +319,7 @@ export class DocumentEmbeddingSession implements EmbedderInterface {
 
     let identity: EmbeddingComputationIdentity | null
     try {
-      identity = await this.embedder.getComputationIdentity()
+      identity = (await this.embedder.getComputationIdentity?.()) ?? null
     } catch {
       return null
     }
