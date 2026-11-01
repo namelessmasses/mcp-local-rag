@@ -3,7 +3,9 @@
 // actual exit codes and stderr surface that users see.
 
 import { spawnSync } from 'node:child_process'
-import { dirname, resolve } from 'node:path'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
@@ -11,6 +13,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const PROJECT_ROOT = resolve(__dirname, '../../..')
 const ENTRY = resolve(PROJECT_ROOT, 'src/index.ts')
+const TSX_LOADER = import.meta.resolve('tsx')
 
 interface RunResult {
   status: number | null
@@ -92,5 +95,58 @@ describe('CLI entry routing', () => {
     // None of the control characters from the input should reach stderr verbatim.
     expect(stderr).not.toContain('[31m')
     expect(stderr).not.toContain('[0m')
+  })
+})
+
+describe('per-repo config file at the entry point', () => {
+  function runIn(
+    directory: string,
+    env: NodeJS.ProcessEnv,
+    args: string[]
+  ): { status: number | null; stderr: string } {
+    // Absolute loader URL: `--import tsx` would resolve from the temp cwd.
+    const result = spawnSync(process.execPath, ['--import', TSX_LOADER, ENTRY, ...args], {
+      encoding: 'utf-8',
+      cwd: directory,
+      timeout: 15000,
+      env: { ...process.env, EMBED_BACKEND: '', LMSTUDIO_MODEL: '', ...env },
+    })
+    return { status: result.status, stderr: result.stderr ?? '' }
+  }
+
+  function withConfig(content: string, run: (directory: string) => void): void {
+    const directory = mkdtempSync(join(tmpdir(), 'rag-entry-'))
+    try {
+      writeFileSync(join(directory, '.mcp-local-rag.json'), content)
+      run(directory)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  }
+
+  it('applies .mcp-local-rag.json before the CLI reads its configuration', () => {
+    withConfig('{"EMBED_BACKEND":"lmstudio"}', (directory) => {
+      const { status, stderr } = runIn(directory, {}, ['list'])
+
+      expect(status).toBe(1)
+      expect(stderr).toContain('EMBED_BACKEND=lmstudio requires LMSTUDIO_MODEL')
+    })
+  })
+
+  it('lets a real environment variable override the file', () => {
+    withConfig('{"EMBED_BACKEND":"lmstudio"}', (directory) => {
+      const { stderr } = runIn(directory, { EMBED_BACKEND: 'transformers' }, ['list', '--help'])
+
+      expect(stderr).not.toContain('requires LMSTUDIO_MODEL')
+    })
+  })
+
+  it('exits with a clear error for a malformed file', () => {
+    withConfig('{ nope', (directory) => {
+      const { status, stderr } = runIn(directory, {}, ['list'])
+
+      expect(status).toBe(1)
+      expect(stderr).toContain('is not valid JSON')
+    })
   })
 })

@@ -435,6 +435,42 @@ dimension, vector norm, and latency.
 </details>
 
 <details>
+<summary>Per-repo Config File</summary>
+
+Put a `.mcp-local-rag.json` file in a repository's root to give that repository its own
+settings, so each MCP client and the CLI need no per-repo environment variables. The keys are the
+environment variable names:
+
+```json
+{
+  "EMBED_BACKEND": "lmstudio",
+  "LMSTUDIO_MODEL": "text-embedding-embeddinggemma-300m",
+  "DB_PATH": ".rag/lancedb-gemma",
+  "IGNORE_PATHS": [".sem/**"]
+}
+```
+
+- **Lookup:** the file is searched for in the working directory and then its parent folders,
+  and the nearest one is used. For a client that starts the server from another directory, set
+  `MCP_LOCAL_RAG_CONFIG` to the file's path in that client's `env` block.
+- **Precedence:** a variable set in the environment wins over the file, key by key (an empty
+  value counts as unset). CLI flags still win over both. `BASE_DIR` and `BASE_DIRS` are treated as
+  a group, so the file never adds a document root when the environment already sets one.
+- **Relative paths:** `DB_PATH`, `CACHE_DIR`, `BASE_DIR` and each `BASE_DIRS` entry resolve against
+  the folder containing the file, not the working directory. Consider adding `.rag/` to that
+  repository's `.gitignore`.
+- **Values:** strings, numbers and booleans, plus arrays of strings for `IGNORE_PATHS` and
+  `BASE_DIRS`.
+- **Allowed settings:** the storage, model, `EMBED_*`, `LMSTUDIO_*`, `STORE_IMAGES` and search
+  tuning variables above. `RAG_RERANK_CMD`, `RAG_RERANK_TIMEOUT_MS` and `HF_ENDPOINT` can only be
+  set through the environment, so a cloned repository cannot make the server run a command.
+  Unknown or environment-only keys print a warning and are ignored.
+- **Errors:** an unreadable or malformed file stops startup with a message; it never falls back
+  to the default model or database.
+
+</details>
+
+<details>
 <summary>PDF Figures and Stored Images</summary>
 
 By default, ingestion indexes only text. To make PDF figures searchable, enable local caption

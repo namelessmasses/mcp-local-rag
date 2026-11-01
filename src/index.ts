@@ -6,6 +6,7 @@
 import { parseGlobalOptions } from './cli/options.js'
 import { handleCli, SUBCOMMANDS, type Subcommand } from './cli-main.js'
 import { startServer } from './server-main.js'
+import { applyConfigFile } from './utils/config-file.js'
 
 // ============================================
 // Routing helpers
@@ -26,6 +27,17 @@ function sanitizeForEcho(s: string): string {
 // ============================================
 // Routing
 // ============================================
+
+// Per-repo defaults must land in the environment before any subcommand or the
+// server reads it. Warnings go to stderr, which stays clear of MCP's stdout.
+try {
+  for (const warning of applyConfigFile(process.env, process.cwd()).warnings) {
+    console.error(`Warning: ${warning}`)
+  }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exit(1)
+}
 
 const { globalOptions, remainingArgs } = parseGlobalOptions(process.argv.slice(2))
 const firstArg = remainingArgs[0]
